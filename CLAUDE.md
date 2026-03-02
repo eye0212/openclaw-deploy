@@ -48,10 +48,12 @@ Before running deploy.sh, verify the user has all of these. Ask them to confirm 
   - Download: tailscale.com/download
   - Log in with **the same Tailscale account** you'll authorize on the VPS
   - Without this, your Tailscale-only service URLs (n8n, Ollama, etc.) will not load
-- [ ] **Emergency console access (recommended):** In Hetzner dashboard, go to your server →
-  Rescue → Reset Root Password. Save that password somewhere. This gives you a browser-based
-  fallback login if SSH ever becomes inaccessible. Without this, the web console login prompt
-  cannot be completed (no password is set by default on SSH-key-only servers).
+- [ ] **Emergency console access (do this first — required):** In Hetzner dashboard, go to
+  your server → Rescue → Reset Root Password. Save that password in your password manager
+  right now. This is your only way back in if SSH becomes inaccessible during setup — Hetzner
+  VPS servers have no root password by default, so the web console login is unusable without it.
+  If you skip this and get locked out, there is no recovery path other than the Hetzner rescue
+  system (see Troubleshooting), which is significantly harder.
 
 If any of these are missing, help the user get them before proceeding.
 
@@ -640,8 +642,12 @@ The model is ~4 GB — expect 15–30 minutes depending on VPS bandwidth.
 
 **Add OpenAI or Google AI key:**
 1. SSH: `ssh -p <SSH_PORT> openclaw@<VPS_IP>`
-2. Edit: `nano ~/compose/.env` → set `OPENAI_API_KEY=<key>` or `GOOGLE_API_KEY=<key>`
-3. Restart daemon: `systemctl --user restart openclaw-gateway.service`
+2. Edit the gateway env drop-in: `nano ~/.config/systemd/user/openclaw-gateway.service.d/api-keys.conf`
+   Add the line: `Environment=OPENAI_API_KEY=<key>` or `Environment=GOOGLE_API_KEY=<key>`
+3. Reload and restart: `systemctl --user daemon-reload && systemctl --user restart openclaw-gateway.service`
+
+Note: `~/compose/.env` is for Docker service config (n8n database, Ollama host, etc.) — it is NOT
+read by the gateway process. API keys go in the systemd drop-in.
 
 **Switch to local AI (Ollama/Mistral — no API cost):**
 - In Discord: type `/model local`
