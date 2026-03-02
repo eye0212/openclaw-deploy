@@ -1,0 +1,12 @@
+# Generated secrets — never commit these
+.env
+*.env.bak
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Claude Code local settings — contains session state, not for repo
+.claude/

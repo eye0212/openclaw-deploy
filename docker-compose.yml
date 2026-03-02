@@ -1,0 +1,144 @@
+# OpenClaw stack — all services private via Tailscale
+# Ports are bound to TAILSCALE_IP so they only listen on the Tailscale interface.
+# Fallback to 0.0.0.0 if TAILSCALE_IP is unset (local testing only).
+
+networks:
+  openclaw-net:
+    driver: bridge
+
+volumes:
+  n8n-data:
+  uptime-kuma-data:
+  ollama-data:
+  whisper-cache:
+
+services:
+
+  # ──────────────────────────────────────────────
+  # n8n Workflow Automation
+  # ──────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:${N8N_IMAGE_TAG:-latest}
+    container_name: n8n
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - N8N_JWT_SECRET=${N8N_JWT_SECRET}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=${N8N_PORT}
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - TZ=${TZ}
+      - GENERIC_TIMEZONE=${TZ}
+    ports:
+      - "${TAILSCALE_IP:-0.0.0.0}:5678:5678"
+    volumes:
+      - n8n-data:/home/node/.n8n
+    networks:
+      - openclaw-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ──────────────────────────────────────────────
+  # Uptime Kuma Monitoring
+  # ──────────────────────────────────────────────
+  uptime-kuma:
+    image: louislam/uptime-kuma:${UPTIME_KUMA_IMAGE_TAG:-latest}
+    container_name: uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "${TAILSCALE_IP:-0.0.0.0}:3001:3001"
+    volumes:
+      - uptime-kuma-data:/app/data
+    networks:
+      - openclaw-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ──────────────────────────────────────────────
+  # Whisper Audio Transcription
+  # ──────────────────────────────────────────────
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:${WHISPER_IMAGE_TAG:-latest}
+    container_name: whisper
+    restart: unless-stopped
+    environment:
+      - ASR_MODEL=${WHISPER_MODEL:-base}
+      - ASR_ENGINE=openai_whisper
+      - WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-en}
+    ports:
+      - "${TAILSCALE_IP:-0.0.0.0}:9000:9000"
+    volumes:
+      - whisper-cache:/root/.cache/whisper
+    networks:
+      - openclaw-net
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+
+  # ──────────────────────────────────────────────
+  # Ollama Local LLM Runner
+  # ──────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-0.6.2}
+    container_name: ollama
+    restart: unless-stopped
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-0.0.0.0}
+      - OLLAMA_ORIGINS=${OLLAMA_ORIGINS:-http://localhost:11434,http://127.0.0.1:11434}
+    ports:
+      - "${TAILSCALE_IP:-0.0.0.0}:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - openclaw-net
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+          cpus: '3.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s

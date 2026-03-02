@@ -1,0 +1,9 @@
+# Ollama models to pull on VPS setup
+# One model per line. Comments (#) and blank lines are ignored.
+# All pulls are background jobs — check: tail -f /tmp/ollama-pull.log
+
+mistral          # Default: 7B general-purpose, fast on CPU
+nomic-embed-text # Required for local vector memory search
+# llama3:8b     # Uncomment for Meta Llama 3 8B
+# qwen2.5:7b    # Uncomment for Alibaba Qwen 2.5 7B (strong at code)
+# neural-chat   # Uncomment for Intel Neural Chat (conversational)
