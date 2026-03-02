@@ -523,3 +523,155 @@ gateway capability in OpenClaw v2026.2.26. The AI agent has 8 tools: `read`, `wr
 **Impact:** VPS-local command execution is not available without an additional compute node setup.
 For VPS file access, use the `read` tool (reads arbitrary VPS files).
 **Fix:** Update SOUL.md to accurately describe VPS fallback capabilities (read/write, not exec).
+
+---
+
+## SECTION 8: Session 3 Bugs (B22-B28) — 2026-03-02
+
+---
+
+### B22 [FIXED] Drop-zone systemPrompt used web_fetch for private Tailscale IP
+
+**What happened:** User dropped URL in #drop-zone. Discord said "Processing..." but no pipeline card appeared.
+Gateway log showed: `blocked URL fetch target=http://100.94.99.89:5678/webhook/research-get reason=Blocked hostname or private/internal/special-use IP address`
+**Root cause:** OpenClaw gateway security layer blocks web_fetch to RFC-1918 / Tailscale addresses. The systemPrompt instructed the AI to use web_fetch on 100.94.99.89.
+**Fix:** Updated systemPrompt to use exec tool (runs curl on Mac node, which has Tailscale access to VPS). Also fixed endpoint: GET /webhook/research-get → POST /webhook/research-intake with JSON body.
+
+---
+
+### B23 [FIXED] Orphaned "Research Intake — GET Bridge" workflow (nQEF9h2euWjSitII)
+
+**What happened:** Stale debug workflow left active, consuming webhook namespace.
+**Fix:** Deleted via n8n API.
+
+---
+
+### B24 [DOCUMENTED] "Unknown Channel" error after failed web_fetch
+
+**What happened:** After web_fetch failed (B22), Claude retried and eventually tried to post a response but got `message failed: Unknown Channel` ~4 min later.
+**Root cause:** Discord WebSocket reconnect clears channel cache. After a failed agent loop, the channel reference went stale.
+**Fix:** Fixing B22/B23 eliminates the retry loop. This error disappears once the systemPrompt is corrected.
+
+---
+
+### B25 [VERIFIED] n8n SSH key presence in authorized_keys
+
+**What happened:** grep for "n8n" in authorized_keys returned nothing (key comment is `openclaw@ubuntu-4gb-ash-1`, not "n8n").
+**Root cause:** False alarm — the key IS present. The comment on the RSA key doesn't contain "n8n".
+**Fix:** Verified by matching public key fingerprint against authorized_keys content. Key confirmed present.
+
+---
+
+### B26 [DEFERRED] No error handling in pipeline branches — silent failures
+
+**What happened:** When upstream API calls fail (GitHub API rate limit, Claude error, etc.), pipeline fails silently with no Discord notification.
+**Fix:** Added continueOnFail to all HTTP Request and SSH nodes. Added error detection in Format Card nodes. Added error card output path. Deployed in pipeline rebuild (Session 3).
+
+---
+
+### B27 [FIXED] research-log.ndjson missing — no deduplication or reading log
+
+**What happened:** Duplicate URLs were processed every time they were dropped.
+**Fix:** Added SSH dedup check node (reads research-log.ndjson, skips known URLs). Added SSH log-to-file nodes after each Discord post. Deployed in pipeline rebuild (Session 3).
+
+---
+
+### B28 [FIXED] .env.template had outdated N8N_IMAGE_TAG=1.85.4
+
+**What happened:** New deployments would install n8n 1.85.4 which had broken SSH RSA key support.
+**Fix:** Changed N8N_IMAGE_TAG=1.85.4 → N8N_IMAGE_TAG=latest in .env.template.
+
+---
+
+## SECTION 9: Research Pipeline — Social Media Extension (Session 4, 2026-03-02)
+
+Added social media URL support (Twitter/X, Bluesky, LinkedIn, Instagram) to the n8n research
+intake pipeline. Goal: drop any social media post about a paper/repo and auto-find the source.
+
+---
+
+### B29 [FIXED] URL Classifier had no social media detection
+
+**What happened:** Instagram, Twitter/X, Bluesky, and LinkedIn URLs were classified as `article`
+and processed through the general article branch, which just scraped the page as text — useless
+for social media.
+**Fix:** Added social media detection to URL Classifier. Added `_depth` field to prevent
+resubmitted URLs (depth≥1) from re-entering the social branch (loop prevention). Social branch
+only fires at depth=0.
+
+---
+
+### B30 [FIXED] Instagram HTML scraping returns JS shell — no caption content
+
+**What happened:** `SM: Fetch Post` (HTTP GET) returned a 900KB HTML file with zero actual
+content — only CSS bundles and JS app code. Instagram moved to a fully JS-rendered architecture;
+no post content exists in the initial HTML even with a valid `sessionid` cookie.
+**Root cause:** Instagram's modern architecture requires JS execution to render post content.
+A simple HTTP GET, even authenticated, only gets the app shell.
+**Fix:** Added `SM: IG Fetch` SSH node that calls `~/scripts/ig_fetch.py` for Instagram URLs.
+The script uses `instagrapi` (Python library) which uses the Instagram mobile API — bypassing the
+web JS requirement entirely.
+**Note:** Other platforms (Twitter/X, Bluesky, LinkedIn) still work via HTTP GET + OG tag
+extraction since they serve content in the initial HTML.
+
+---
+
+### B31 [FIXED] instagrapi login from VPS fails — datacenter IP blacklisted by Instagram
+
+**What happened:** `instagrapi` login from the VPS (Hetzner datacenter IP) immediately returned:
+`"change your IP address, because it is added to the blacklist of the Instagram Server"`
+**Root cause:** Instagram blocks authentication attempts from known datacenter/VPS IP ranges.
+Real users don't log in from Hetzner servers.
+**Fix:** Log in once from Mac (residential IP), save the session JSON, copy to VPS. The VPS
+reuses the saved session without re-authenticating. Session lasts ~90 days.
+**Session renewal procedure:**
+1. `python3 /tmp/ig_login.py` on Mac (handles email verification challenge)
+2. `scp -P 2222 /tmp/ig_session.json openclaw@100.94.99.89:~/.config/ig_session.json`
+
+---
+
+### B32 [FIXED] SM: IG Fetch SSH command only escaped double quotes — command injection risk
+
+**Where:** `SM: IG Fetch` SSH node in `build_pipeline.py`
+**What happened:** The URL was only sanitized with `.replace(/"/g, '\\"')` before being
+interpolated into the shell command. URLs containing backticks, dollar signs, or backslashes
+could break out of the quoted string or execute arbitrary shell commands.
+**Fix:** Applied full 4-character escape matching the pattern used in `ssh_log()`:
+`.replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/$/g,'\\$').replace(/`/g,'\\`')`
+
+---
+
+### B33 [FIXED] SM: Build Rank Req used literal string "null" as Brave search query
+
+**What happened:** When `search_query` was JSON null (Claude found nothing to search for —
+typically the login-wall case), JS template literal coercion converted it to the string "null".
+Brave then searched for "null" and returned Instagram's homepage, which Claude correctly
+identified as not being the source. Functionally correct but wasteful (one Brave query + one
+Claude call for nothing).
+**Fix:** Added `contentEmpty` guard in `SM: Build Rank Req`: if both `search_query` is null AND
+`_extracted_text` is empty, immediately return the rank-skip response without calling Brave.
+This eliminates the wasted API calls on login-wall Instagram posts.
+
+---
+
+### B34 [NOTE] ig_fetch.py Instagram session credentials storage
+
+**Files:** `~/.config/ig_session.json`, `~/.config/ig_creds.json` on VPS
+- Session JSON (~1.5KB): instagrapi session state, renewed from Mac after expiry
+- Creds JSON: `{"username": "eye0396", "password": "..."}` — chmod 600
+- `ig_fetch.py` uses saved session on load; falls through to full login on session expiry
+- Session typically lasts 90+ days before Instagram invalidates it
+- **Do NOT commit session or creds files to git** — they are on the VPS only
+
+---
+
+### B35 [FIXED] YouTube branch didn't process papers/repos found in video descriptions
+
+**What happened:** YouTube videos about research papers had arxiv/GitHub links in their
+descriptions but the pipeline only posted the video summary card — the actual paper was never
+processed.
+**Fix:** Added `YT: Extract Sources` + `YT: Resubmit Sources` nodes that fan out from
+`YT: Call Claude` in parallel with `YT: Format Card`. Extracts up to 3 arxiv/GitHub links
+from Claude's parsed JSON response and resubmits each at depth=1 to the intake webhook.
+
+---

@@ -1,6 +1,7 @@
 # Generated secrets — never commit these
 .env
 *.env.bak
+scripts/pipeline.env
 
 # macOS
 .DS_Store
@@ -10,3 +11,4 @@
 
 # Claude Code local settings — contains session state, not for repo
 .claude/
+scripts/__pycache__/

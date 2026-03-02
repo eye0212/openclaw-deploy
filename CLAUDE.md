@@ -560,6 +560,146 @@ OpenClaw supports multiple interfaces:
 
 ---
 
+## Step 7: Research Pipeline Setup
+
+**Prerequisites:** n8n owner account created (from Step 6), Tailscale running on Mac.
+
+This step deploys the Smart Research Intake Pipeline — the automation that processes
+URLs dropped in your Discord server.
+
+### 7a: Get n8n API key
+
+Go to http://<TAILSCALE_IP>:5678 → Settings (left sidebar) → n8n API → Create API key.
+Copy the generated key (shown once).
+
+### 7b: Create Discord webhooks
+
+In Discord, right-click each channel → Edit Channel → Integrations → Webhooks → New Webhook → Copy Webhook URL:
+- #drop-zone (create if it doesn't exist)
+- #papers — for arxiv research cards
+- #projects — for GitHub repo cards
+
+### 7c: Run pipeline setup
+
+SSH to VPS and run the setup script:
+```
+N8N_API_KEY="<paste key from 7a>" \
+ANTHROPIC_API_KEY="<your Anthropic key>" \
+WEBHOOK_DROPZONE="<#drop-zone webhook URL>" \
+WEBHOOK_PAPERS="<#papers webhook URL>" \
+WEBHOOK_PROJECTS="<#projects webhook URL>" \
+bash ~/openclaw-deploy/scripts/setup-n8n.sh
+```
+
+The script will:
+1. Create Anthropic credential in n8n
+2. Generate SSH key for n8n → VPS access
+3. Deploy the research intake pipeline
+4. Configure #drop-zone in OpenClaw to auto-trigger pipeline
+
+**Test:** Drop `https://arxiv.org/abs/2408.09869` in your Discord #drop-zone channel.
+You should see a paper card appear in #papers within 15 seconds.
+
+### n8n 2.x Known Issues
+
+If you rebuild the pipeline manually:
+- Webhook node: add `webhookId` UUID at root level, not inside parameters
+- Switch node: use typeVersion 3 with `mode: "rules"` (typeVersion 1 broken — routes all to output 0)
+- SSH credential: RSA PEM key only (`ssh-keygen -t rsa -b 4096 -m PEM`)
+- Anthropic API calls: strip `_meta` from request body
+- `responseMode`: use `"onReceived"` not `"immediatelyAfterReceive"`
+
+---
+
+## Step 8: Social Media Pipeline — Instagram Session Setup
+
+After the research pipeline is running (Step 7 complete), enable Instagram support by setting up
+the `ig_fetch.py` script on the VPS. This lets you drop any Instagram post URL into `#drop-zone`
+and have it automatically find the referenced paper or GitHub repo.
+
+### 8a: Install instagrapi on VPS
+
+```bash
+ssh -p <SSH_PORT> openclaw@<VPS_IP> "curl -sS https://bootstrap.pypa.io/get-pip.py | python3 - --break-system-packages 2>&1 | tail -2 && python3 -m pip install --break-system-packages instagrapi 2>&1 | tail -3"
+```
+
+### 8b: Upload the fetch script and save credentials
+
+```bash
+mkdir -p ~/Desktop/openclaw-deploy/scripts  # already exists
+scp -P <SSH_PORT> ~/Desktop/openclaw-deploy/scripts/ig_fetch.py openclaw@<VPS_IP>:~/scripts/ig_fetch.py
+ssh -p <SSH_PORT> openclaw@<VPS_IP> "chmod +x ~/scripts/ig_fetch.py && mkdir -p ~/.config"
+
+# Save Instagram burner account credentials
+ssh -p <SSH_PORT> openclaw@<VPS_IP> 'python3 -c "
+import json
+open(\"/home/openclaw/.config/ig_creds.json\",\"w\").write(json.dumps({\"username\":\"BURNER_USERNAME\",\"password\":\"BURNER_PASSWORD\"}))
+import os; os.chmod(\"/home/openclaw/.config/ig_creds.json\", 0o600)
+print(\"saved\")
+"'
+```
+
+Replace `BURNER_USERNAME` and `BURNER_PASSWORD` with your Instagram burner account credentials.
+
+### 8c: First login — must be done from Mac (VPS IP is datacenter-blacklisted by Instagram)
+
+Instagram blocks login attempts from datacenter IPs. Log in from your Mac once to create a session:
+
+```bash
+# Install instagrapi on Mac
+pip3 install --break-system-packages instagrapi
+
+# Run the login script
+python3 ~/Desktop/openclaw-deploy/scripts/ig_fetch.py
+```
+
+Instagram will email a 6-digit verification code to the address on the burner account. When prompted,
+enter it. The script saves the session to `/tmp/ig_session.json`.
+
+Copy the session to the VPS:
+```bash
+scp -P <SSH_PORT> /tmp/ig_session.json openclaw@<VPS_IP>:~/.config/ig_session.json
+```
+
+### 8d: Test it
+
+```bash
+ssh -p <SSH_PORT> openclaw@<VPS_IP> \
+  "PATH=\$PATH:/home/openclaw/.local/bin python3 ~/scripts/ig_fetch.py 'https://www.instagram.com/p/DTBQZu8jO2A/' 2>&1"
+```
+
+Should return JSON with a `caption` field. Then test end-to-end:
+```bash
+curl -X POST http://<TAILSCALE_IP>:5678/webhook/research-intake \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://www.instagram.com/p/DTBQZu8jO2A/"}'
+```
+
+A paper card should appear in `#papers` within 30 seconds.
+
+### Session renewal (every ~90 days)
+
+When Instagram invalidates the session, `ig_fetch.py` will return `{"error": "..."}`. Renew:
+```bash
+python3 ~/Desktop/openclaw-deploy/scripts/ig_fetch.py  # on Mac, enter verification code
+scp -P <SSH_PORT> /tmp/ig_session.json openclaw@<VPS_IP>:~/.config/ig_session.json
+```
+
+### What social media URLs are supported
+
+| Platform | URL pattern | How it's fetched |
+|----------|-------------|-----------------|
+| Instagram posts/reels | `instagram.com/p/` or `/reel/` | `ig_fetch.py` (instagrapi mobile API) |
+| Twitter/X | `twitter.com/` or `x.com/*/status/*` | HTTP GET + OG tag extraction |
+| Bluesky | `bsky.app/profile/*/post/*` | HTTP GET + OG tag extraction |
+| LinkedIn | `linkedin.com/posts/` or `/feed/updates/` | HTTP GET + OG tag extraction |
+
+For all platforms: if the post caption contains a direct arxiv/GitHub URL, it's submitted at depth=1.
+If not, Brave search is used with the best query Claude can form from the caption.
+If nothing is found, a fallback summary card is posted to `#drop-zone`.
+
+---
+
 ## Troubleshooting Reference
 
 ### SSH connection refused (deploy.sh fails at upload)
@@ -621,6 +761,22 @@ If Discord bot is online but not responding:
 ssh -p <SSH_PORT> openclaw@<VPS_IP> 'docker compose -f ~/compose/docker-compose.yml logs <SERVICE_NAME>'
 ```
 Replace `<SERVICE_NAME>` with: `n8n`, `ollama`, `whisper`, or `uptime-kuma`
+
+### Drop-zone says "Processing" but no card appears
+
+1. Check gateway logs for the blocked URL error:
+   `ssh -p <SSH_PORT> openclaw@<VPS_IP> 'journalctl --user -u openclaw-gateway.service -n 20'`
+   If you see "Blocked hostname or private/internal/special-use IP address":
+   The drop-zone systemPrompt needs to be updated to use exec+curl.
+   Re-run Step 7c to fix.
+
+2. Check n8n received the webhook:
+   Go to http://<TAILSCALE_IP>:5678 → Executions
+   If no execution appears, the webhook was never called.
+   If execution appears but failed, check the execution detail for the error node.
+
+3. Check the pipeline is active:
+   n8n → Workflows → "Smart Research Intake" should show "Active" (green toggle)
 
 ### n8n can't be reached in browser
 - Make sure Tailscale is running and logged in on your Mac
