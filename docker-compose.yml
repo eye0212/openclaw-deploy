@@ -46,7 +46,7 @@ services:
           memory: 128M
           cpus: '0.25'
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:5678/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5678/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -106,7 +106,8 @@ services:
           memory: 512M
           cpus: '0.5'
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      # /health doesn't exist; /asr returns 405 for GET — any HTTP response = service is up
+      test: ["CMD", "sh", "-c", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/asr | grep -qE '^[0-9]{3}$'"]
       interval: 30s
       timeout: 15s
       retries: 5
@@ -137,7 +138,8 @@ services:
           memory: 1G
           cpus: '0.5'
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      # no curl binary in container; use ollama CLI instead
+      test: ["CMD", "sh", "-c", "OLLAMA_HOST=127.0.0.1:11434 ollama list 2>/dev/null || exit 1"]
       interval: 30s
       timeout: 15s
       retries: 5

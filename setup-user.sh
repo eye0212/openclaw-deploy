@@ -528,7 +528,11 @@ check_health() {
   fi
 }
 
-check_health "Whisper"      "http://${HEALTH_HOST}:9000/health"
+# /health doesn't exist on Whisper; /asr returns 405 for GET which means the service is up
+whisper_http=$(curl -s -o /dev/null -w "%{http_code}" "http://${HEALTH_HOST}:9000/asr" 2>/dev/null || true)
+[[ "${whisper_http}" =~ ^[0-9]{3}$ ]] \
+  && echo -e "  ${GREEN}✓${NC} Whisper (http://${HEALTH_HOST}:9000/asr — HTTP ${whisper_http})" \
+  || echo -e "  ${YELLOW}?${NC} Whisper (http://${HEALTH_HOST}:9000/asr) — not responding"
 check_health "n8n"          "http://${HEALTH_HOST}:5678/healthz"
 check_health "Uptime Kuma"  "http://${HEALTH_HOST}:3001"
 check_health "Ollama"       "http://${HEALTH_HOST}:11434/api/tags"

@@ -415,3 +415,111 @@ Worth preserving in future versions:
 14. Time estimates for long steps (UX 6)
 15. Version check script for image tags (Maintenance 1)
 16. Full smoke test on fresh VPS before release (Maintenance 3)
+
+---
+
+## SECTION 7: Mac Node (Post-Deployment) — Session 2026-03-01
+
+These bugs were found while adding a Mac node for Claude Code-style terminal access via Discord.
+They do not affect the initial deployment — they apply to anyone setting up a compute node.
+
+---
+
+### Mac Node Bug B13 — `bind: tailnet` crashes without allowedOrigins
+
+**What happened:** Changing `gateway.bind` to `"tailnet"` causes crash: "non-loopback Control UI
+requires gateway.controlUi.allowedOrigins". Even with `dangerouslyAllowHostHeaderOriginFallback=true`,
+the Mac node's security check blocks `ws://` to non-loopback IPs.
+**Fix:** Use `bind: loopback` and an SSH port-forward tunnel instead. The tunnel is Tailscale-protected
+(only Tailscale devices can reach port 2222), so this is actually more secure.
+**Lesson:** Do not attempt `bind: tailnet` for a Mac node setup. Use the SSH tunnel approach.
+
+---
+
+### Mac Node Bug B14 — SSH has `AllowTcpForwarding no` blocking the tunnel
+
+**File:** `/etc/ssh/sshd_config.d/99-openclaw.conf`
+**What happened:** SSH tunnel failed with "administratively prohibited: open failed".
+setup-root.sh writes `AllowTcpForwarding no` which blocks all port forwarding.
+**Fix applied to setup-root.sh:** Changed `AllowTcpForwarding no` → `AllowTcpForwarding local`
+(allows local forwards only — more secure than `yes`, still enables the SSH tunnel).
+
+---
+
+### Mac Node Bug B15 — Mac node auth token changes after first pairing
+
+**What happened:** Mac node authentication uses two different tokens:
+1. Initial pairing: use the OPERATOR token as `OPENCLAW_GATEWAY_TOKEN`. Gateway auto-approves,
+   assigns role=node, and stores a node-specific token in `~/.openclaw/identity/device-auth.json`.
+2. After pairing: `OPENCLAW_GATEWAY_TOKEN` must be set to the NODE-ROLE token from `device-auth.json`.
+**Fix:** After first successful connection, update the LaunchAgent plist to use the node-role token
+from `~/.openclaw/identity/device-auth.json → tokens.node.token`.
+Check if `openclaw node install` handles this automatically — if not, this manual step is required.
+
+---
+
+### Mac Node Bug B16 — exec-approvals.json security defaults to `deny`
+
+**File:** `~/.openclaw/exec-approvals.json`
+**What happened:** Adding `**` to `agents.*.allowlist` does NOT enable exec. The default `security`
+mode is `"deny"` which blocks ALL shell commands with `SYSTEM_RUN_DISABLED` regardless of allowlist.
+**Root cause:** `DEFAULT_SECURITY = "deny"` in exec-approvals source. The `security` field must be
+explicitly set to `"full"` to allow all commands, or `"allowlist"` to use pattern matching.
+**Fix:** Use the gateway API — NOT direct file editing (see B17):
+```bash
+echo '{"version":1,"defaults":{"security":"full"},"agents":{}}' | \
+  openclaw approvals set --node "YourNodeName" --stdin
+```
+
+---
+
+### Mac Node Bug B17 — exec-approvals.json is overwritten on node startup
+
+**What happened:** Direct edits to `~/.openclaw/exec-approvals.json` are lost every time the
+node process restarts. The node initializes a fresh config on startup.
+**Fix:** Always use `openclaw approvals set --node "NodeName" --stdin` or
+`openclaw approvals allowlist add --node "NodeName"` to configure exec approvals.
+These commands persist the config via the gateway API.
+
+---
+
+### Mac Node Bug B18 — Docker container healthchecks broken (n8n, Ollama, Whisper)
+
+**File:** `docker-compose.yml`
+**Fixed in this package.**
+- **n8n:** `localhost` inside the container resolves to `[::1]` (IPv6) but n8n listens on IPv4 only.
+  Fix: use `127.0.0.1` explicitly.
+- **Ollama:** Container has no `curl` binary. Fix: use `OLLAMA_HOST=127.0.0.1:11434 ollama list`.
+- **Whisper:** `/health` endpoint doesn't exist (returns 405). Fix: check for any HTTP response
+  on `/asr` (which also returns 405 for GET — but that means the service is up).
+
+---
+
+### Mac Node Bug B19 — External Whisper health check uses wrong endpoint + `-f` flag
+
+**File:** `setup-user.sh` (end-of-script health checks), `CLAUDE.md` Step 5
+**Fixed in this package.**
+The health checks used `curl -sf http://HOST:9000/health` which fails because:
+1. `/health` doesn't exist on the Whisper container (returns 405).
+2. The `-f` flag causes curl to fail on any 4xx response.
+Fix: check for any HTTP response on `/asr` without `-f`.
+
+---
+
+### Mac Node Bug B20 — AI agent CLI timeout too short
+
+**What happened:** `timeout 60` is not enough for end-to-end AI agent calls — the model response,
+node execution, and result formatting together often exceed 60 seconds.
+**Fix:** Use `timeout 120` or longer for verification commands involving the AI agent.
+
+---
+
+### Mac Node Bug B21 — VPS `exec` tool does not exist despite being in `tools.allow`
+
+**File:** `~/.openclaw/openclaw.json` on VPS
+**What happened:** Adding `"exec"` to `tools.allow` has no effect. The exec tool is not a built-in
+gateway capability in OpenClaw v2026.2.26. The AI agent has 8 tools: `read`, `write`, `web_search`,
+`web_fetch`, `nodes`, `message`, `memory_search`, `memory_get` — no shell exec primitive.
+**Impact:** VPS-local command execution is not available without an additional compute node setup.
+For VPS file access, use the `read` tool (reads arbitrary VPS files).
+**Fix:** Update SOUL.md to accurately describe VPS fallback capabilities (read/write, not exec).

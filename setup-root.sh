@@ -256,7 +256,7 @@ ClientAliveCountMax 2
 # Forwarding
 X11Forwarding no
 AllowAgentForwarding no
-AllowTcpForwarding no
+AllowTcpForwarding local
 PermitTunnel no
 
 # Misc

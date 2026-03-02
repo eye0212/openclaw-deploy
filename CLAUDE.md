@@ -469,7 +469,7 @@ Run this via the Bash tool to verify all services are up:
 ssh -i <SSH_KEY_PATH> -p <SSH_PORT> -o BatchMode=yes -o ConnectTimeout=10 openclaw@<VPS_IP> \
   "H=\$(tailscale ip -4 2>/dev/null || grep '^TAILSCALE_IP=' ~/compose/.env | cut -d= -f2); \
   cd ~/compose && docker compose ps --format 'table {{.Name}}\t{{.Status}}' && echo '---' && \
-  curl -sf http://\${H}:9000/health -o /dev/null && echo 'Whisper: OK' && \
+  curl -s -o /dev/null -w '%{http_code}' http://\${H}:9000/asr | grep -qE '^[0-9]{3}$' && echo 'Whisper: OK' && \
   curl -sf http://\${H}:5678/healthz -o /dev/null && echo 'n8n: OK' && \
   curl -sf http://\${H}:11434/api/tags -o /dev/null && echo 'Ollama: OK' && \
   curl -sf http://\${H}:3001/ -o /dev/null && echo 'Uptime Kuma: OK'"
