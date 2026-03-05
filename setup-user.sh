@@ -313,6 +313,7 @@ info "  Back it up. Re-encrypt to ~/openclaw-deploy/.env.enc after any edits."
 banner "Step 5/6: Set up OpenClaw config"
 mkdir -p "${HOME}/.openclaw/skills/video-implementer"
 mkdir -p "${HOME}/.openclaw/skills/web-researcher"
+chmod 700 "${HOME}/.openclaw"
 
 # Patch openclaw.json: replace localhost:11434 with the actual Tailscale IP.
 # Docker ports are bound to ${TAILSCALE_IP}, not 0.0.0.0, so localhost won't route to Ollama.
@@ -320,9 +321,12 @@ OC_TAILSCALE_IP=$(grep "^TAILSCALE_IP=" "${DEPLOY_DIR}/.env" | cut -d= -f2 || tr
 OC_TAILSCALE_IP="${OC_TAILSCALE_IP:-localhost}"
 sed "s|http://localhost:11434|http://${OC_TAILSCALE_IP}:11434|g" \
   "${DEPLOY_DIR}/openclaw/openclaw.json" > "${HOME}/.openclaw/openclaw.json"
+chmod 600 "${HOME}/.openclaw/openclaw.json"
 
-cp "${DEPLOY_DIR}/openclaw/SOUL.md"   "${HOME}/.openclaw/SOUL.md"
+sed "s|__TAILSCALE_IP__|${OC_TAILSCALE_IP}|g" "${DEPLOY_DIR}/openclaw/SOUL.md" > "${HOME}/.openclaw/SOUL.md"
+chmod 600 "${HOME}/.openclaw/SOUL.md"
 cp "${DEPLOY_DIR}/openclaw/MEMORY.md" "${HOME}/.openclaw/MEMORY.md"
+chmod 600 "${HOME}/.openclaw/MEMORY.md"
 
 # Patch USER.md with real first name and timezone from .env (preserves the template with placeholders)
 _FIRST_NAME=$(grep "^USER_FIRST_NAME=" "${DEPLOY_DIR}/.env" | cut -d= -f2 || true)
@@ -332,6 +336,7 @@ _TIMEZONE_ESC=$(printf '%s\n' "${_TIMEZONE}" | sed 's/[&|\\]/\\&/g')
 sed -e "s|__USER_FIRST_NAME__|${_FIRST_NAME_ESC}|g" \
     -e "s|__TIMEZONE__|${_TIMEZONE_ESC}|g" \
     "${DEPLOY_DIR}/openclaw/USER.md" > "${HOME}/.openclaw/USER.md"
+chmod 600 "${HOME}/.openclaw/USER.md"
 cp "${DEPLOY_DIR}/openclaw/skills/video-implementer/SKILL.md" \
    "${HOME}/.openclaw/skills/video-implementer/SKILL.md"
 cp "${DEPLOY_DIR}/openclaw/skills/web-researcher/SKILL.md" \
@@ -352,6 +357,14 @@ info "Health check host: ${HEALTH_HOST}"
 # Pre-flight: verify all image tags exist before pulling anything
 info "Verifying Docker image tags..."
 verify_image_tags
+
+COMPOSE_TS_IP=$(grep "^TAILSCALE_IP=" "${COMPOSE_DIR}/.env" | cut -d= -f2 || true)
+if [[ -z "${COMPOSE_TS_IP}" ]]; then
+  error "TAILSCALE_IP is empty in ${COMPOSE_DIR}/.env!"
+  error "Docker ports would bind to 0.0.0.0 (all interfaces = public internet)."
+  exit 1
+fi
+success "TAILSCALE_IP=${COMPOSE_TS_IP} — ports bound to Tailscale only"
 
 if ! docker compose up -d; then
   error "Docker stack failed to start. Check logs with: docker compose logs"

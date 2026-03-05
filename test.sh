@@ -512,11 +512,11 @@ else
   fail "CLAUDE.md: no openclaw daemon health check — only Docker services verified"
 fi
 
-# CLAUDE.md: Telegram /start or first-message instruction
-if grep -qi "/start\|first message.*pair\|pair.*first message\|send.*bot.*start\|send.*\/start" CLAUDE.md; then
-  pass "CLAUDE.md: Telegram /start / first-message pairing instruction present"
+# CLAUDE.md: Discord setup instructions present (Telegram was replaced by Discord)
+if grep -qi "discord.*channel\|#commands\|send.*message.*discord" CLAUDE.md; then
+  pass "CLAUDE.md: Discord channel setup instructions present"
 else
-  fail "CLAUDE.md: no Telegram pairing instruction — user won't know to send /start"
+  fail "CLAUDE.md: no Discord channel setup instructions"
 fi
 
 # CLAUDE.md: openclaw test BEFORE n8n browser steps in handoff
@@ -617,6 +617,71 @@ if grep -q "WHISPER_LANGUAGE=\${WHISPER_LANGUAGE" docker-compose.yml || grep -q 
   pass "docker-compose.yml: WHISPER_LANGUAGE uses env var (not hardcoded to 'en')"
 else
   fail "docker-compose.yml: WHISPER_LANGUAGE hardcoded — users can't change language without editing compose file"
+fi
+
+# ── Section 12: Security hardening audit ──────────────────────────────────────
+section "Security hardening audit"
+
+# D1: No hardcoded Tailscale IP in tracked files
+if grep -rl "100\.94\.99\.89" --include="*.py" --include="*.sh" --include="*.md" . 2>/dev/null \
+  | grep -v feedback | grep -v ".env" | grep -v ".jsonl" | grep -v node_modules | grep -v "test\.sh" | grep -q .; then
+  fail "Hardcoded Tailscale IP 100.94.99.89 found in tracked files"
+else
+  pass "No hardcoded Tailscale IP in tracked .py/.sh/.md files"
+fi
+
+# D2: .openclaw directory permissions set in setup-user.sh
+if grep -q "chmod 700.*\.openclaw" setup-user.sh; then
+  pass "setup-user.sh: chmod 700 on ~/.openclaw directory"
+else
+  fail "setup-user.sh: missing chmod 700 on ~/.openclaw directory"
+fi
+
+if grep -q "chmod 600.*openclaw\.json" setup-user.sh; then
+  pass "setup-user.sh: chmod 600 on openclaw.json"
+else
+  fail "setup-user.sh: missing chmod 600 on openclaw.json"
+fi
+
+# D3: TAILSCALE_IP validated before docker compose up
+if grep -q 'COMPOSE_TS_IP' setup-user.sh && grep -q "ports would bind to 0.0.0.0" setup-user.sh; then
+  pass "setup-user.sh: TAILSCALE_IP validated before docker compose up"
+else
+  fail "setup-user.sh: TAILSCALE_IP not validated before docker compose up — ports may bind to 0.0.0.0"
+fi
+
+# D4: No hardcoded n8n credential IDs in build_pipeline.py
+if grep -q "atCi6uloSP2GsQoc\|tG7H8NLHL7E2J66k" scripts/build_pipeline.py; then
+  fail "build_pipeline.py: hardcoded n8n credential IDs still present"
+else
+  pass "build_pipeline.py: no hardcoded credential IDs"
+fi
+
+# D5: SOUL.md placeholders replaced by sed (not plain cp) in setup-user.sh
+if grep -q 'sed.*__TAILSCALE_IP__.*SOUL.md' setup-user.sh; then
+  pass "setup-user.sh: SOUL.md placeholders replaced via sed"
+else
+  fail "setup-user.sh: SOUL.md still copied with cp (placeholders not replaced)"
+fi
+
+# D6: Root SSH lockdown step present in CLAUDE.md
+if grep -q "PermitRootLogin no" CLAUDE.md; then
+  pass "CLAUDE.md: root SSH lockdown step present (Step 5.5)"
+else
+  fail "CLAUDE.md: no root SSH lockdown step"
+fi
+
+# D7: SOUL.md, USER.md, MEMORY.md have chmod 600 in setup-user.sh
+PERM_MISSING=""
+for f in SOUL.md USER.md MEMORY.md; do
+  if ! grep -q "chmod 600.*${f}" setup-user.sh; then
+    PERM_MISSING="${PERM_MISSING} ${f}"
+  fi
+done
+if [[ -z "${PERM_MISSING}" ]]; then
+  pass "setup-user.sh: chmod 600 on SOUL.md, USER.md, MEMORY.md"
+else
+  fail "setup-user.sh: missing chmod 600 on:${PERM_MISSING}"
 fi
 
 # ── Results ──────────────────────────────────────────────────────────────────────

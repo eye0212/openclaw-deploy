@@ -16,7 +16,7 @@ Usage:
 import json, requests, uuid, argparse, os, sys
 
 # ── defaults from environment ─────────────────────────────────────────────────
-_N8N_BASE      = os.environ.get("N8N_BASE_URL",       "http://100.94.99.89:5678")
+_N8N_BASE      = os.environ.get("N8N_BASE_URL",       "http://localhost:5678")
 _N8N_API_KEY   = os.environ.get("N8N_API_KEY",        "")
 _GCAL_CRED_ID  = os.environ.get("N8N_GCAL_CRED_ID",  "")
 _OLD_WF_ID     = os.environ.get("N8N_OLD_GCAL_WF_ID","")

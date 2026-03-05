@@ -9,11 +9,11 @@ import json, requests, uuid, argparse, os, sys
 # ── defaults from environment (no secrets hardcoded) ─────────────────────────
 # Copy pipeline.env.example → pipeline.env, fill in values, then:
 #   source pipeline.env && python3 build_pipeline.py
-_N8N_BASE         = os.environ.get("N8N_BASE_URL", "http://100.94.99.89:5678")
+_N8N_BASE         = os.environ.get("N8N_BASE_URL", "http://localhost:5678")
 _N8N_API_KEY      = os.environ.get("N8N_API_KEY", "")
 _BRAVE_API_KEY    = os.environ.get("BRAVE_API_KEY", "")
-_SSH_CRED         = {"id": os.environ.get("N8N_SSH_CRED_ID", "atCi6uloSP2GsQoc"), "name": "SSH Private Key account"}
-_ANTH_CRED        = {"id": os.environ.get("N8N_ANTH_CRED_ID", "tG7H8NLHL7E2J66k"), "name": "Anthropic account"}
+_SSH_CRED         = {"id": os.environ.get("N8N_SSH_CRED_ID", ""), "name": "SSH Private Key account"}
+_ANTH_CRED        = {"id": os.environ.get("N8N_ANTH_CRED_ID", ""), "name": "Anthropic account"}
 _WEBHOOK_DROPZONE = os.environ.get("DISCORD_WEBHOOK_DROPZONE", "")
 _WEBHOOK_PAPERS   = os.environ.get("DISCORD_WEBHOOK_PAPERS", "")
 _WEBHOOK_PROJECTS = os.environ.get("DISCORD_WEBHOOK_PROJECTS", "")
@@ -34,6 +34,8 @@ args = parser.parse_args()
 for label, val in [
     ("N8N_API_KEY / --n8n-api-key",           args.n8n_api_key),
     ("BRAVE_API_KEY / --brave-api-key",        args.brave_api_key),
+    ("N8N_SSH_CRED_ID / --ssh-cred-id",        args.ssh_cred_id),
+    ("N8N_ANTH_CRED_ID / --anthropic-cred-id", args.anthropic_cred_id),
     ("DISCORD_WEBHOOK_DROPZONE / --webhook-dropzone", args.webhook_dropzone),
     ("DISCORD_WEBHOOK_PAPERS / --webhook-papers",     args.webhook_papers),
     ("DISCORD_WEBHOOK_PROJECTS / --webhook-projects", args.webhook_projects),
@@ -773,7 +775,7 @@ sm_if_direct = mk("IF: Has Direct URL", "n8n-nodes-base.if", 2, [2160, Y], {
 # Direct path (TRUE) — Y=1100
 sm_resubmit_direct = mk("SM: Resubmit Direct", "n8n-nodes-base.httpRequest", 4, [2400, 1100], {
     "method": "POST",
-    "url": "http://100.94.99.89:5678/webhook/research-intake",
+    "url": f"{N8N_BASE}/webhook/research-intake",
     "sendBody": True,
     "specifyBody": "json",
     "jsonBody": '={{ JSON.stringify({url: $json.found_url, _depth: 1, _via: "social-direct", _confidence: $json.confidence}) }}',
@@ -911,7 +913,7 @@ sm_if_rank = mk("IF: Rank Succeeded", "n8n-nodes-base.if", 2, [3360, Y], {
 # Search found (TRUE) — Y=1100
 sm_resubmit_search = mk("SM: Resubmit Search", "n8n-nodes-base.httpRequest", 4, [3600, 1100], {
     "method": "POST",
-    "url": "http://100.94.99.89:5678/webhook/research-intake",
+    "url": f"{N8N_BASE}/webhook/research-intake",
     "sendBody": True,
     "specifyBody": "json",
     "jsonBody": '={{ JSON.stringify({url: $json.found_url, _depth: 1, _via: "social-search", _confidence: $json.confidence}) }}',
@@ -1027,7 +1029,7 @@ return links.slice(0, 3).map(url => ({ json: { url } }));
 
 yt_resubmit_sources = mk("YT: Resubmit Sources", "n8n-nodes-base.httpRequest", 4, [2640, 350], {
     "method": "POST",
-    "url": "http://100.94.99.89:5678/webhook/research-intake",
+    "url": f"{N8N_BASE}/webhook/research-intake",
     "sendBody": True,
     "specifyBody": "json",
     "jsonBody": '={{ JSON.stringify({url: $json.url, _depth: 1, _via: "youtube"}) }}',
@@ -1157,7 +1159,7 @@ if r2.status_code != 200:
 
 print(f"\nWorkflow URL: {N8N_BASE}/workflow/{new_id}")
 print(f"Webhook:     POST {N8N_BASE}/webhook/research-intake")
-print("""Test commands:
-  GitHub: curl -X POST http://100.94.99.89:5678/webhook/research-intake -H 'Content-Type: application/json' -d '{"url":"https://github.com/ollama/ollama"}'
-  arxiv:  curl -X POST http://100.94.99.89:5678/webhook/research-intake -H 'Content-Type: application/json' -d '{"url":"https://arxiv.org/abs/2408.09869"}'
+print(f"""Test commands:
+  GitHub: curl -X POST {N8N_BASE}/webhook/research-intake -H 'Content-Type: application/json' -d '{{"url":"https://github.com/ollama/ollama"}}'
+  arxiv:  curl -X POST {N8N_BASE}/webhook/research-intake -H 'Content-Type: application/json' -d '{{"url":"https://arxiv.org/abs/2408.09869"}}'
 """)

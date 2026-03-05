@@ -497,9 +497,28 @@ After all checks, report each service clearly:
 > ✓ OpenClaw daemon: healthy
 > (? Mistral 7B: still downloading in background — ~20 min)
 
-If all services show "Up" and health checks pass, proceed to Step 6.
+If all services show "Up" and health checks pass, proceed to Step 5.5.
 
 If any service is down, see the Troubleshooting section.
+
+---
+
+## Step 5.5: Lock Down Root SSH
+
+Now that all setup is complete, disable root login over SSH. This prevents
+brute-force attacks against the root account.
+
+Tell the user: "Locking down root SSH access — all future admin work uses the openclaw account."
+
+Use the Bash tool (SSH command):
+```
+ssh -i <SSH_KEY_PATH> -p <SSH_PORT> root@<VPS_IP> \
+  "sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config.d/99-openclaw.conf && \
+   sed -i 's/AllowUsers openclaw root/AllowUsers openclaw/' /etc/ssh/sshd_config.d/99-openclaw.conf && \
+   systemctl restart ssh && echo 'Root SSH disabled'"
+```
+
+On success: "Root SSH login disabled. From now on, use `ssh -p <SSH_PORT> openclaw@<VPS_IP>` for all access."
 
 ---
 
@@ -890,7 +909,7 @@ Flow: Discord → Claude (Mac node) → exec+curl → n8n webhook → Gmail/Cale
 3. Go to **APIs & Services → OAuth consent screen** → External → fill in app name ("OpenClaw"), your email, save
 4. Go to **APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID**
    - Application type: **Web application**
-   - Authorized redirect URI: `http://100.94.99.89:5678/rest/oauth2-credential/callback`
+   - Authorized redirect URI: `http://<TAILSCALE_IP>:5678/rest/oauth2-credential/callback`
    - Click Create → copy the **Client ID** and **Client Secret**
 
 ### 9b: Create Gmail credential in n8n
@@ -950,7 +969,7 @@ After workflows are deployed and active, Claude can use them immediately — no 
 - Verify webhook path: should be exactly `gmail-bridge` or `calendar-bridge`
 
 **OAuth error / "invalid_client":**
-- Confirm redirect URI in Google Cloud exactly matches: `http://100.94.99.89:5678/rest/oauth2-credential/callback`
+- Confirm redirect URI in Google Cloud exactly matches: `http://<TAILSCALE_IP>:5678/rest/oauth2-credential/callback`
 - Note: http not https
 
 **Empty results from Gmail search:**
@@ -1006,9 +1025,10 @@ Cron jobs are managed via `openclaw cron` CLI, not JSON config:
 # List jobs
 openclaw cron list
 
-# Add a job
+# Add a job (use discord:<SERVER_ID>/commands to target a specific channel)
 openclaw cron add --name "job-name" --cron "0 7 * * *" --tz "America/New_York" \
-  --message "Task instructions" --announce --channel last --timeout-seconds 120
+  --message "Task instructions" --announce --channel "discord:<SERVER_ID>/commands" --timeout-seconds 120
+# Note: --channel last sends to whichever channel was most recently active (may not be what you want)
 
 # Disable/enable/remove
 openclaw cron disable <id>
@@ -1047,7 +1067,38 @@ For Apple ecosystem skills to work, grant in System Settings > Privacy & Securit
 Template at `openclaw/mcporter.json`. Deploy to `~/.mcporter/mcporter.json` on VPS.
 Replace `__BRAVE_API_KEY__`, `__GITHUB_PAT__`, `__N8N_API_KEY__` with real values.
 
-### 10f: Remaining manual setup
+### 10f: Mac anti-sleep (caffeinate LaunchAgent)
+
+If the Mac node runs on a MacBook, prevent it from sleeping so cron jobs and Discord messages
+can reach it. Install a persistent `caffeinate` LaunchAgent:
+
+```bash
+mkdir -p ~/Library/LaunchAgents
+cat > ~/Library/LaunchAgents/com.openclaw.caffeinate.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.openclaw.caffeinate</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-i</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>
+EOF
+launchctl load ~/Library/LaunchAgents/com.openclaw.caffeinate.plist
+```
+
+To uninstall: `launchctl unload ~/Library/LaunchAgents/com.openclaw.caffeinate.plist && rm ~/Library/LaunchAgents/com.openclaw.caffeinate.plist`
+
+### 10g: Remaining manual setup
 
 | Extension | What's needed |
 |-----------|--------------|
