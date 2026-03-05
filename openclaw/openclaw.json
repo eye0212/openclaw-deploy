@@ -70,9 +70,9 @@
     }
   },
   "tools": {
-    "allow": ["web_search", "web_fetch", "memory_search", "memory_get", "message"],
-    "deny":  ["exec", "bash", "process", "read", "write", "edit",
-              "browser", "gateway", "cron", "nodes"]
+    "allow": ["web_search", "web_fetch", "memory_search", "memory_get", "message",
+              "nodes", "exec", "read", "write", "cron"],
+    "deny":  ["bash", "process", "edit", "browser", "gateway"]
   },
   "memory": {
     "embeddings": {

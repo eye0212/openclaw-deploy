@@ -959,3 +959,115 @@ After workflows are deployed and active, Claude can use them immediately — no 
 
 **n8n credential needs re-authorization (after ~6 months):**
 - n8n → Credentials → find the Gmail or Calendar credential → click it → Reconnect
+
+---
+
+## Step 10: Creative Extensions (Proactive Agent + Skills)
+
+**Prerequisites:** Steps 1-6 complete, Discord working.
+
+This step transforms OpenClaw from reactive (answer when asked) to proactive (morning briefings,
+blog monitoring, stock alerts, Apple ecosystem integration).
+
+### What was deployed
+
+| Component | Location | Status |
+|-----------|----------|--------|
+| ClawHub CLI | VPS `~/.npm-global/bin/clawhub` | Installed |
+| 11 skills | VPS `~/.openclaw/skills/` | Installed |
+| blogwatcher CLI | VPS `~/.local/bin/blogwatcher` | Installed, 5 feeds configured |
+| basic-memory MCP | VPS mcporter config | 18 tools, healthy |
+| 3 cron jobs | VPS `openclaw cron list` | morning-briefing, evening-preview, weekly-summary |
+| HEARTBEAT.md | VPS `~/.openclaw/HEARTBEAT.md` | Created |
+| SOUL.md extensions | VPS `~/.openclaw/SOUL.md` | Proactive behavior, safety rules |
+| Mac CLIs | Mac (brew) | memo, remindctl, imsg, spogo, gifgrep |
+| Coding workspace | Mac `~/openclaw-workspace/` | Created |
+
+### 10a: Skills installed via ClawHub
+
+```
+weather              — Weather via wttr.in (no API key)
+blogwatcher          — RSS/blog monitoring via blogwatcher CLI
+fundamental-stock-analysis — US equity analysis (web_search, no API key)
+apple-notes          — Apple Notes via memo CLI (Mac exec)
+apple-reminders      — Apple Reminders via remindctl CLI (Mac exec)
+imsg                 — iMessage via imsg CLI (Mac exec)
+spotify-player       — Spotify via spogo CLI (Mac exec)
+gifgrep              — GIF search via gifgrep CLI (Mac exec)
+wavespeed-nano-banana-pro — Image generation (needs WAVESPEED_API_KEY)
+video-implementer    — (pre-existing)
+web-researcher       — (pre-existing)
+```
+
+### 10b: Cron jobs (added via CLI, not openclaw.json)
+
+Cron jobs are managed via `openclaw cron` CLI, not JSON config:
+```bash
+# List jobs
+openclaw cron list
+
+# Add a job
+openclaw cron add --name "job-name" --cron "0 7 * * *" --tz "America/New_York" \
+  --message "Task instructions" --announce --channel last --timeout-seconds 120
+
+# Disable/enable/remove
+openclaw cron disable <id>
+openclaw cron enable <id>
+openclaw cron rm <id>
+
+# Test a job now
+openclaw cron run <id>
+```
+
+Current schedule:
+- `morning-briefing` — 7:00 AM ET daily
+- `evening-preview` — 9:00 PM ET daily
+- `weekly-summary` — Monday 8:00 AM ET
+
+### 10c: blogwatcher feeds
+
+Configured feeds (stored in `~/.config/blogwatcher/`):
+- Anthropic (`https://www.anthropic.com/feed.xml`)
+- OpenAI (`https://openai.com/blog/rss/`)
+- Google AI (`https://blog.google/technology/ai/rss/`)
+- Hacker News (`https://hnrss.org/frontpage`)
+- arxiv CS.AI (`http://export.arxiv.org/rss/cs.AI`)
+
+Manage: `blogwatcher add/remove/blogs/scan`
+
+### 10d: Mac permissions needed
+
+For Apple ecosystem skills to work, grant in System Settings > Privacy & Security:
+- **Reminders** access for Terminal (remindctl)
+- **Full Disk Access** for Terminal (imsg reads Messages DB)
+- **Automation** > Terminal controlling Messages.app (imsg sends)
+
+### 10e: mcporter.json
+
+Template at `openclaw/mcporter.json`. Deploy to `~/.mcporter/mcporter.json` on VPS.
+Replace `__BRAVE_API_KEY__`, `__GITHUB_PAT__`, `__N8N_API_KEY__` with real values.
+
+### 10f: Remaining manual setup
+
+| Extension | What's needed |
+|-----------|--------------|
+| Gmail/Calendar | Google OAuth (Step 9) |
+| Spotify | `spogo auth import --browser chrome` on Mac |
+| Image generation | WaveSpeed API key from wavespeed.ai/accesskey |
+| Discord #feeds/#finance | Create channels + webhooks for blog/stock alerts |
+| Voice calls (Twilio) | Twilio account + Cloudflare Tunnel (most complex) |
+
+### Tools config (openclaw.json)
+
+The deploy template now has `cron` in the allow list and removed from deny:
+```json
+"tools": {
+  "allow": ["web_search", "web_fetch", "memory_search", "memory_get", "message",
+            "nodes", "exec", "read", "write", "cron"],
+  "deny":  ["bash", "process", "edit", "browser", "gateway"]
+}
+```
+
+Note: The live VPS config diverges from this template after the deployment wizard runs.
+The wizard adds Discord channels, gateway auth, model aliases, etc. This template is for
+fresh deploys only.
