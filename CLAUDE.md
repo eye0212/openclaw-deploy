@@ -585,11 +585,14 @@ SSH to VPS and run the setup script:
 ```
 N8N_API_KEY="<paste key from 7a>" \
 ANTHROPIC_API_KEY="<your Anthropic key>" \
+BRAVE_API_KEY="<key from api.search.brave.com>" \
 WEBHOOK_DROPZONE="<#drop-zone webhook URL>" \
 WEBHOOK_PAPERS="<#papers webhook URL>" \
 WEBHOOK_PROJECTS="<#projects webhook URL>" \
 bash ~/openclaw-deploy/scripts/setup-n8n.sh
 ```
+
+See `scripts/pipeline.env.example` for all available settings.
 
 The script will:
 1. Create Anthropic credential in n8n
@@ -650,15 +653,16 @@ Instagram blocks login attempts from datacenter IPs. Log in from your Mac once t
 pip3 install --break-system-packages instagrapi
 
 # Run the login script
-python3 ~/Desktop/openclaw-deploy/scripts/ig_fetch.py
+python3 ~/Desktop/openclaw-deploy/scripts/ig_login.py
 ```
 
-Instagram will email a 6-digit verification code to the address on the burner account. When prompted,
-enter it. The script saves the session to `/tmp/ig_session.json`.
+The script reads `~/.config/ig_creds.json` and handles the login interactively.
+Instagram may email a 6-digit verification code to the address on the burner account — enter it
+when prompted. The script saves the session to `~/Desktop/ig_session.json`.
 
 Copy the session to the VPS:
 ```bash
-scp -P <SSH_PORT> /tmp/ig_session.json openclaw@<VPS_IP>:~/.config/ig_session.json
+scp -P <SSH_PORT> ~/Desktop/ig_session.json openclaw@<VPS_IP>:~/.config/ig_session.json
 ```
 
 ### 8d: Test it
@@ -681,8 +685,8 @@ A paper card should appear in `#papers` within 30 seconds.
 
 When Instagram invalidates the session, `ig_fetch.py` will return `{"error": "..."}`. Renew:
 ```bash
-python3 ~/Desktop/openclaw-deploy/scripts/ig_fetch.py  # on Mac, enter verification code
-scp -P <SSH_PORT> /tmp/ig_session.json openclaw@<VPS_IP>:~/.config/ig_session.json
+python3 ~/Desktop/openclaw-deploy/scripts/ig_login.py  # on Mac, enter verification code if prompted
+scp -P <SSH_PORT> ~/Desktop/ig_session.json openclaw@<VPS_IP>:~/.config/ig_session.json
 ```
 
 ### What social media URLs are supported
@@ -865,3 +869,93 @@ This is expected behavior when run via Claude Code (stdin is not a TTY). deploy.
 
 ### "Age key" question
 If the user asks what the age key is: "It's an encryption key that protects all your API keys and passwords stored on the server. Think of it like a master password for your secrets vault. Without it, you can't decrypt your secrets — that's why we backed it up."
+
+---
+
+## Step 9: Gmail + Google Calendar Integration
+
+**Prerequisites:** Step 7 (n8n) complete, n8n owner account created, Tailscale running on Mac.
+
+This step connects OpenClaw to Eugene's personal Gmail and Google Calendar.
+Claude can then answer "check my email" or "what's on my calendar today?" from Discord.
+
+Flow: Discord → Claude (Mac node) → exec+curl → n8n webhook → Gmail/Calendar API → reply
+
+### 9a: Google Cloud Setup (Eugene does this in browser)
+
+1. Go to **console.cloud.google.com** → Create a new project (or use existing)
+2. In the project, go to **APIs & Services → Enable APIs** and enable both:
+   - **Gmail API**
+   - **Google Calendar API**
+3. Go to **APIs & Services → OAuth consent screen** → External → fill in app name ("OpenClaw"), your email, save
+4. Go to **APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID**
+   - Application type: **Web application**
+   - Authorized redirect URI: `http://100.94.99.89:5678/rest/oauth2-credential/callback`
+   - Click Create → copy the **Client ID** and **Client Secret**
+
+### 9b: Create Gmail credential in n8n
+
+1. Open http://<TAILSCALE_IP>:5678 → **Credentials** (left sidebar) → **Add credential**
+2. Search for **"Gmail OAuth2"** → select it
+3. Paste the OAuth Client ID and Client Secret from step 9a
+4. Click **Connect** → complete the Google sign-in → authorize access
+5. Click **Save** → copy the credential **ID** from the URL bar (looks like: `abc123XYZdef`)
+
+### 9c: Create Google Calendar credential in n8n
+
+1. Still in Credentials → **Add credential**
+2. Search for **"Google Calendar OAuth2 API"** → select it
+3. Paste the **same** OAuth Client ID and Client Secret
+4. Click **Connect** → complete the Google sign-in → authorize access to calendar
+5. Click **Save** → copy the credential **ID**
+
+### 9d: Deploy Gmail Bridge workflow
+
+Run from your Mac terminal (or from Claude Code):
+```bash
+N8N_API_KEY="<paste your n8n API key>" \
+N8N_GMAIL_CRED_ID="<credential ID from step 9b>" \
+python3 ~/Desktop/openclaw-deploy/scripts/build_gmail.py
+```
+
+To get your n8n API key: n8n → **Settings → n8n API → Create API key**
+
+### 9e: Deploy Calendar Bridge workflow
+
+```bash
+N8N_API_KEY="<paste your n8n API key>" \
+N8N_GCAL_CRED_ID="<credential ID from step 9c>" \
+OPENCLAW_TIMEZONE="America/New_York" \
+python3 ~/Desktop/openclaw-deploy/scripts/build_calendar.py
+```
+
+### 9f: Verify in Discord
+
+Test by sending these messages in your #commands channel:
+- "Search my inbox for unread emails from today"
+- "What's on my calendar today?"
+- "Create a calendar event: Test event tomorrow at 2pm to 3pm"
+
+Claude calls exec → n8n → Gmail/Calendar API → returns formatted results.
+
+### What SOUL.md teaches Claude to do
+
+The SOUL.md file on the VPS already has the curl commands for Gmail and Calendar.
+After workflows are deployed and active, Claude can use them immediately — no restart needed.
+
+### Troubleshooting Gmail/Calendar
+
+**"Workflow not found" or 404 from webhook:**
+- Check workflow is Active (green toggle) in n8n Workflows list
+- Verify webhook path: should be exactly `gmail-bridge` or `calendar-bridge`
+
+**OAuth error / "invalid_client":**
+- Confirm redirect URI in Google Cloud exactly matches: `http://100.94.99.89:5678/rest/oauth2-credential/callback`
+- Note: http not https
+
+**Empty results from Gmail search:**
+- The Google account authorized must be the one with your email
+- If you authorized a different account, delete the credential in n8n and re-create it
+
+**n8n credential needs re-authorization (after ~6 months):**
+- n8n → Credentials → find the Gmail or Calendar credential → click it → Reconnect

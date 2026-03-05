@@ -9,13 +9,6 @@ import json, requests, uuid, argparse, os, sys
 # ── defaults from environment (no secrets hardcoded) ─────────────────────────
 # Copy pipeline.env.example → pipeline.env, fill in values, then:
 #   source pipeline.env && python3 build_pipeline.py
-def _require(var):
-    v = os.environ.get(var, "")
-    if not v:
-        print(f"ERROR: ${var} is not set. See scripts/pipeline.env.example.", file=sys.stderr)
-        sys.exit(1)
-    return v
-
 _N8N_BASE         = os.environ.get("N8N_BASE_URL", "http://100.94.99.89:5678")
 _N8N_API_KEY      = os.environ.get("N8N_API_KEY", "")
 _BRAVE_API_KEY    = os.environ.get("BRAVE_API_KEY", "")

@@ -675,3 +675,65 @@ processed.
 from Claude's parsed JSON response and resubmits each at depth=1 to the intake webhook.
 
 ---
+
+## SECTION 10: Code Audit Findings (2026-03-02)
+
+Static review of all scripts and support files. No deployment was run — findings based on
+code analysis only.
+
+---
+
+### B36 [FIXED] `scripts/build_save_workflow.py` contained hardcoded secrets
+
+**File:** `scripts/build_save_workflow.py` (now deleted)
+**What was there:** n8n API key (JWT) hardcoded at line 6; Discord webhook URL hardcoded at
+line 9. The file was not referenced anywhere in the codebase — its functionality was fully
+superseded by `build_pipeline.py`.
+**Fix:** File deleted.
+
+---
+
+### B37 [FIXED] `.gitignore` missing Instagram credential file patterns
+
+**File:** `.gitignore`
+**What happened:** `ig_creds.json` and `ig_session.json` live on the VPS at `~/.config/`, but
+if a user accidentally copies them locally they would be committed to git.
+**Fix:** Added `ig_creds.json` and `ig_session.json` to `.gitignore`.
+
+---
+
+### B38 [FIXED] `setup-n8n.sh` missing `BRAVE_API_KEY` — fresh installs fail at pipeline step
+
+**File:** `scripts/setup-n8n.sh` lines 13–17 (required-var check) and lines 56–63 (build_pipeline.py invocation)
+**What happened:** `build_pipeline.py` requires `--brave-api-key` and exits with an error if
+not provided. `setup-n8n.sh` called `build_pipeline.py` without `--brave-api-key`, so any
+fresh deployment via `setup-n8n.sh` would fail at step 6.
+**Fix:** Added `[[ -z "$BRAVE_API_KEY" ]] && error "..."` to required-var check; added
+`--brave-api-key "$BRAVE_API_KEY"` to the `build_pipeline.py` invocation. Also updated
+CLAUDE.md Step 7c to include `BRAVE_API_KEY` in the invocation example.
+
+---
+
+### B39 [FIXED] `setup-n8n.sh` drop-zone systemPrompt was outdated (no social media handling)
+
+**File:** `scripts/setup-n8n.sh` lines 73–83 (embedded Python `new_prompt` string)
+**What happened:** The embedded systemPrompt only handled generic URL processing with a single
+confirmation message. It had no social media URL type detection, no differentiation between
+arxiv/github/youtube/social, and no mention of the social branch.
+Fresh deployments via `setup-n8n.sh` would configure the bot without social media support,
+inconsistent with the pipeline's actual capabilities.
+**Fix:** Updated `new_prompt` to match current behavior — type detection for arxiv, github,
+instagram/twitter/bluesky/linkedin, youtube, and other URLs, with appropriate response text
+for each. Matches the systemPrompt used in production.
+
+---
+
+### B40 [FIXED] `build_pipeline.py` had dead `_require()` function (lines 12–17)
+
+**File:** `scripts/build_pipeline.py`
+**What happened:** `_require()` was defined but never called anywhere. All required-var
+validation goes through argparse (lines 41–50). The function was a leftover from before
+argparse was added.
+**Fix:** Removed the dead function.
+
+---

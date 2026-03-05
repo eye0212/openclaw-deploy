@@ -12,6 +12,7 @@ error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 # 1. Check required vars
 [[ -z "$N8N_API_KEY" ]] && error "N8N_API_KEY is required"
 [[ -z "$ANTHROPIC_API_KEY" ]] && error "ANTHROPIC_API_KEY is required"
+[[ -z "$BRAVE_API_KEY" ]] && error "BRAVE_API_KEY is required (get a free key at api.search.brave.com)"
 [[ -z "$WEBHOOK_DROPZONE" ]] && error "WEBHOOK_DROPZONE is required"
 [[ -z "$WEBHOOK_PAPERS" ]] && error "WEBHOOK_PAPERS is required"
 [[ -z "$WEBHOOK_PROJECTS" ]] && error "WEBHOOK_PROJECTS is required"
@@ -56,6 +57,7 @@ info "Deploying Smart Research Intake pipeline..."
 python3 ~/openclaw-deploy/scripts/build_pipeline.py \
   --n8n-url "$N8N_URL" \
   --n8n-api-key "$N8N_API_KEY" \
+  --brave-api-key "$BRAVE_API_KEY" \
   --anthropic-cred-id "$ANTH_CRED_ID" \
   --ssh-cred-id "$SSH_CRED_ID" \
   --webhook-dropzone "$WEBHOOK_DROPZONE" \
@@ -71,15 +73,21 @@ import json
 cfg_path = '/home/openclaw/.openclaw/openclaw.json'
 with open(cfg_path) as f: cfg = json.load(f)
 new_prompt = (
-    'You are the research intake bot for the #drop-zone channel. '
+    'You are the research intake bot for the #drop-zone channel.\n\n'
     'When a message contains a URL (starting with http:// or https://), your ONLY job is:\n'
     '1. Extract the URL from the message\n'
-    '2. Use the exec tool to run this EXACT command (replace THE_URL with the actual URL):\n'
+    '2. Use the exec tool to run this EXACT command, replacing THE_URL with the actual URL:\n'
     '   curl -s -X POST \'http://${VPS_N8N_IP}:5678/webhook/research-intake\' '
     '-H \'Content-Type: application/json\' -d \'{"url":"THE_URL"}\'\n'
-    '3. Respond with: "Processing THE_URL... card will appear shortly \u2713"\n\n'
-    'IMPORTANT: Use exec tool, NOT web_fetch. exec runs on Mac which can reach VPS.\n'
-    'If message contains no URL, respond normally.'
+    '3. Respond with a one-liner confirming what type of content was detected:\n'
+    '   - arxiv URL \u2192 "Processing paper... card will appear in #papers shortly"\n'
+    '   - github URL \u2192 "Processing repo... card will appear in #projects shortly"\n'
+    '   - instagram/twitter/x.com/bluesky/linkedin URL \u2192 "Processing social post... finding the source paper or repo, card will appear shortly"\n'
+    '   - youtube URL \u2192 "Processing video... summary card will appear in #drop-zone shortly"\n'
+    '   - anything else \u2192 "Processing... card will appear shortly"\n\n'
+    'IMPORTANT: Use exec tool (not web_fetch). exec runs on Mac which can reach the VPS via Tailscale.\n'
+    'Do NOT summarize or fetch the URL yourself. Just run the curl command.\n'
+    'If the message contains no URL, respond normally as a helpful assistant.'
 )
 for gid, guild in cfg['channels']['discord']['guilds'].items():
     if 'drop-zone' in guild.get('channels', {}):
